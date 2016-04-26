@@ -38,6 +38,8 @@ class ShapeFileRender(object):
         header.append(shape_type)
         if self.shape_type_def[shape_type] == 'Null Shape':
             return header
+        if self.shape_type_def[shape_type] == 'Point':
+            return header
         elif self.shape_type_def[shape_type] == 'PolyLine' or self.shape_type_def[shape_type] == 'Polygon':
             for i in range(4):
                 header.append(unpack('<d', ''.join(header_bytes[i*8+4:i*8+12]))[0])    #bounding_box
@@ -53,19 +55,7 @@ class ShapeFileRender(object):
         else:
             return None
         
-    def get_polyline(self, data):
-        header = self.get_record_header(data[0:48])
-        points = []
-        for i in range(header[6]*2):
-            pt = unpack('<d', ''.join(data[i*8+48:i*8+56]))[0]
-            if (i & 0x1) == 0:    #even = longitude = x
-                pt = (pt + 180) * self.pixel
-            else:                #odd = latitude = y
-                pt = ((pt - 90) * -1) * self.pixel
-            points.append(pt)
-        self.draw_polyline(points)
-        
-    def get_polygon(self, data):
+    def draw_poly(self, data, shape_type):
         header = self.get_record_header(data)
         points = []
         if header[5] > 1:
@@ -81,7 +71,10 @@ class ShapeFileRender(object):
                     else:                #odd = latitude = y
                         pt = ((pt - 90) * -1) * self.pixel
                     points.append(pt)
-                self.draw_polygon(points)
+                if self.shape_type_def[shape_type] == 'Polygon':
+                    self.draw_polygon(points)
+                else:
+                    self.draw_polyline(points)
         else:
             for i in range(header[6]*2):
                 pt = unpack('<d', ''.join(data[i*8+48:i*8+56]))[0]
@@ -90,7 +83,10 @@ class ShapeFileRender(object):
                 else:                #odd = latitude = y
                     pt = ((pt - 90) * -1) * self.pixel
                 points.append(pt)
-            self.draw_polygon(points)
+            if self.shape_type_def[shape_type] == 'Polygon':
+                self.draw_polygon(points)
+            else:
+                self.draw_polyline(points)
         
     def draw_polygon(self, points):
         for j in range(0, len(points)):
@@ -99,6 +95,13 @@ class ShapeFileRender(object):
     def draw_polyline(self, points):
         for j in range(0, len(points)):
             self.drawbuffer.line(points, fill=self.color, width=self.linewidth)
+            
+    def draw_point(self, data, size):
+        x = unpack('<d', ''.join(data[0:8]))[0]
+        x = (x + 180) * self.pixel
+        y = unpack('<d', ''.join(data[8:16]))[0]
+        y = ((y - 90) * -1) * self.pixel
+        self.drawbuffer.ellipse((x-size, y-size, x+size, y+size), fill=self.color)
         
     def read_file(self, file):
         f = open(file, 'rb')
@@ -147,10 +150,12 @@ class ShapeFileRender(object):
             record_nr = unpack('>i', ''.join(self.data[i:i+4]))[0]    #big endian
             content_length = unpack('>i', ''.join(self.data[i+4:i+8]))[0] * 2
             shape_type = unpack('<i', ''.join(self.data[i+8:i+12]))[0]    #little endian
-            if shape_type == 3:
-                self.get_polyline(self.data[i+8:i+8+content_length])
-            elif shape_type == 5:
-                self.get_polygon(self.data[i+8:i+8+content_length])
+            if self.shape_type_def[shape_type] == 'Null Shape':
+                pass
+            elif self.shape_type_def[shape_type] == 'Point':
+                self.draw_point(self.data[i+12:i+12+16], 2)
+            elif self.shape_type_def[shape_type] == 'PolyLine' or self.shape_type_def[shape_type] == 'Polygon':
+                self.draw_poly(self.data[i+8:i+8+content_length],shape_type)
             else:
                 print '--- ' + self.shape_type_def[shape_type] + ' ---'
             i += content_length + 8
@@ -175,4 +180,11 @@ if __name__ == '__main__':
     config2.append('ne_110m_coastline.shp')
     config2.append('black')
     
-    ShapeFileRender(config1)
+    config3 = []
+    config3.append(-1.0)    #-1.0 = read bounding box from first shape file
+    config3.append(-1.0)
+    config3.append('white')
+    config3.append('ne_10m_populated_places_simple.shp')
+    config3.append('red')
+    
+    ShapeFileRender(config3)
